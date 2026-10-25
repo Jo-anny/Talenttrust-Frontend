@@ -4,6 +4,10 @@ import { useEffect, useState } from 'react';
 import { readAdmin } from './admin';
 import { getAddress } from './freighter';
 
+/**
+ * true when the connected Freighter account is the contract admin (arbiter),
+ * false when it is not or no wallet is connected, null while checking.
+ */
 export function useIsArbiter(): boolean | null {
   const [isArbiter, setIsArbiter] = useState<boolean | null>(null);
 
@@ -13,6 +17,10 @@ export function useIsArbiter(): boolean | null {
     const checkArbiter = async () => {
       try {
         const address = await getAddress();
+        if (!address) {
+          if (active) setIsArbiter(false);
+          return;
+        }
         const admin = await readAdmin();
         // This client-side check is a UX gate only; the contract remains the authority.
         if (active) setIsArbiter(address === admin);
