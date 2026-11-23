@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { SWRConfig, type SWRConfiguration } from 'swr';
 import { api, ApiError } from './api';
 
-export type ContractFilters = Record<string, string | number | boolean> | null;
+export type ContractFilters = Record<string, string | number | boolean | undefined> | null;
 
 export type ContractsListKey = ['/api/v1/contracts', ContractFilters];
 
