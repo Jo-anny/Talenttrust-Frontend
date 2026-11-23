@@ -1,5 +1,7 @@
 import type { ViewFilter } from './api';
 import {
+  PAGE_SIZE,
+  PAGE_SIZES,
   parseQuery,
   SORTS,
   STATUSES,
@@ -43,8 +45,18 @@ function isContractQuery(value: unknown): value is ContractQuery {
     Object.prototype.hasOwnProperty.call(SORTS, query.sort) &&
     typeof query.page === 'number' &&
     Number.isSafeInteger(query.page) &&
-    query.page > 0
+    query.page > 0 &&
+    PAGE_SIZES.some((size) => size === query.size)
   );
+}
+
+function addDefaultPageSize(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const preset = value as Record<string, unknown>;
+  if (!preset.query || typeof preset.query !== 'object') return value;
+  const query = preset.query as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(query, 'size')) return value;
+  return { ...preset, query: { ...query, size: PAGE_SIZE } };
 }
 
 function isPreset(value: unknown): value is FilterPreset {
@@ -90,12 +102,15 @@ export function loadPresets(): FilterPresetStore {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') throw new Error('Invalid preset store');
     const value = parsed as Record<string, unknown>;
-    if (value.version !== FILTER_PRESETS_VERSION || !isPresetList(value.presets)) {
+    const presetsWithPageSize = Array.isArray(value.presets)
+      ? value.presets.map(addDefaultPageSize)
+      : value.presets;
+    if (value.version !== FILTER_PRESETS_VERSION || !isPresetList(presetsWithPageSize)) {
       throw new Error('Invalid preset store');
     }
 
-    const presets = value.presets.slice(0, FILTER_PRESETS_MAX);
-    if (value.presets.length > FILTER_PRESETS_MAX) {
+    const presets = presetsWithPageSize.slice(0, FILTER_PRESETS_MAX);
+    if (presetsWithPageSize.length > FILTER_PRESETS_MAX) {
       console.warn('Too many saved filter presets; extra presets have been removed.');
       savePresets({ version: FILTER_PRESETS_VERSION, presets });
     }

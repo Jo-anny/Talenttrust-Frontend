@@ -9,7 +9,7 @@ const ids = (list: EscrowContract[]) => list.map((c) => c.id);
 describe('parseQuery', () => {
   it.each([
     ['', DEFAULT_QUERY],
-    ['status=Funded&q=audit&sort=total&page=2', { status: 'Funded', q: 'audit', sort: 'total', page: 2 }],
+    ['status=Funded&q=audit&sort=total&page=2', { status: 'Funded', q: 'audit', sort: 'total', page: 2, size: 10 }],
     ['status=funded', DEFAULT_QUERY],
     ['status=Bogus', DEFAULT_QUERY],
     ['sort=price', DEFAULT_QUERY],
@@ -18,19 +18,28 @@ describe('parseQuery', () => {
     ['page=-3', DEFAULT_QUERY],
     ['page=1.5', DEFAULT_QUERY],
     ['page=abc', DEFAULT_QUERY],
+    ['size=10', DEFAULT_QUERY],
+    ['size=25', { ...DEFAULT_QUERY, size: 25 }],
+    ['size=50', { ...DEFAULT_QUERY, size: 50 }],
+    ['size=0', DEFAULT_QUERY],
+    ['size=11', DEFAULT_QUERY],
+    ['size=25.0', DEFAULT_QUERY],
+    ['size=025', DEFAULT_QUERY],
+    ['size=abc', DEFAULT_QUERY],
     ['q=%20%20logo%20', { ...DEFAULT_QUERY, q: 'logo' }],
   ])('%s', (search, expected) => {
     expect(parseQuery(new URLSearchParams(search))).toEqual(expected);
   });
 
   it('round-trips through toSearchParams', () => {
-    const query = q({ status: 'Disputed', q: 'gabc', sort: 'escrow', page: 3 });
+    const query = q({ status: 'Disputed', q: 'gabc', sort: 'escrow', page: 3, size: 25 });
     expect(parseQuery(toSearchParams(query))).toEqual(query);
   });
 
   it('leaves defaults out of the URL', () => {
     expect(toSearchParams(DEFAULT_QUERY).toString()).toBe('');
     expect(toSearchParams(q({ sort: 'oldest' })).toString()).toBe('sort=oldest');
+    expect(toSearchParams(q({ size: 25 })).toString()).toBe('size=25');
   });
 });
 
@@ -115,26 +124,34 @@ describe('applyQuery', () => {
   });
 
   describe('pagination', () => {
-    const many = Array.from({ length: 43 }, (_, i) => escrow(i + 1));
-
-    it('returns the requested page', () => {
-      const r = applyQuery(many, q({ page: 2 }));
-      expect(r).toMatchObject({ total: 43, page: 2, pageCount: 5, from: 11, to: 20 });
-      expect(ids(r.items)).toEqual([33, 32, 31, 30, 29, 28, 27, 26, 25, 24]);
+    it.each([10, 25, 50] as const)('uses page size %i for paging math', (size) => {
+      const many = Array.from({ length: size * 2 + 3 }, (_, i) => escrow(i + 1));
+      const sizedResult = applyQuery(many, q({ page: 2, size }));
+      expect(sizedResult).toMatchObject({
+        total: size * 2 + 3,
+        page: 2,
+        pageCount: 3,
+        from: size + 1,
+        to: size * 2,
+      });
+      expect(sizedResult.items).toHaveLength(size);
     });
 
     it('returns a short last page', () => {
+      const many = Array.from({ length: 43 }, (_, i) => escrow(i + 1));
       const r = applyQuery(many, q({ page: 5 }));
       expect(r).toMatchObject({ page: 5, from: 41, to: 43 });
       expect(r.items).toHaveLength(3);
     });
 
     it('clamps a page past the end to the last page', () => {
+      const many = Array.from({ length: 43 }, (_, i) => escrow(i + 1));
       expect(applyQuery(many, q({ page: 99 }))).toMatchObject({ page: 5, from: 41, to: 43 });
     });
 
     it('handles an exact multiple of the page size', () => {
-      expect(applyQuery(many.slice(0, 20), q({ page: 3 }))).toMatchObject({ page: 2, pageCount: 2, from: 11, to: 20 });
+      const many = Array.from({ length: 20 }, (_, i) => escrow(i + 1));
+      expect(applyQuery(many, q({ page: 3 }))).toMatchObject({ page: 2, pageCount: 2, from: 11, to: 20 });
     });
 
     it('handles an empty list', () => {

@@ -43,7 +43,7 @@ describe('filter preset store', () => {
   it('round-trips the query and role view through URL search parameters', () => {
     const original = {
       name: 'Current filters',
-      query: { status: 'Funded' as const, q: 'design work', sort: 'oldest' as const, page: 3 },
+      query: { ...DEFAULT_QUERY, status: 'Funded' as const, q: 'design work', sort: 'oldest' as const, page: 3 },
       view: 'freelancer' as const,
     };
 
@@ -51,6 +51,24 @@ describe('filter preset store', () => {
     const restored = searchToPreset(search.toString(), original.name);
 
     expect(restored).toEqual(original);
+  });
+
+  it('defaults the page size when loading presets saved before size was added', () => {
+    localStorage.setItem(
+      FILTER_PRESETS_KEY,
+      JSON.stringify({
+        version: FILTER_PRESETS_VERSION,
+        presets: [
+          {
+            name: 'Older preset',
+            query: { status: 'Funded', q: '', sort: 'newest', page: 1 },
+            view: 'all',
+          },
+        ],
+      }),
+    );
+
+    expect(loadPresets().presets[0].query.size).toBe(DEFAULT_QUERY.size);
   });
 
   it('warns and resets corrupt local storage without throwing', () => {

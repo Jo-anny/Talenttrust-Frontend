@@ -5,10 +5,12 @@ import { NotificationsProvider } from '@/components/NotificationsProvider';
 import { EscrowDashboard } from '@/components/EscrowDashboard';
 import type { EscrowContract } from '@/lib/api';
 
+const mockNavigation = vi.hoisted(() => ({ search: '', replace: vi.fn() }));
+
 vi.mock('next/navigation', () => ({
   usePathname: () => '/contracts',
-  useRouter: () => ({ replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: mockNavigation.replace }),
+  useSearchParams: () => new URLSearchParams(mockNavigation.search),
 }));
 
 const json = (body: unknown, status = 200) =>
@@ -38,6 +40,8 @@ const renderDash = () =>
   );
 
 beforeEach(() => {
+  mockNavigation.search = '';
+  mockNavigation.replace.mockClear();
   localStorage.clear();
   vi.restoreAllMocks();
 });
@@ -70,6 +74,28 @@ describe('EscrowDashboard', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ data: [] })));
     renderDash();
     expect(await screen.findByText(/no escrows yet/i)).toBeInTheDocument();
+  });
+
+  it('updates the page size in the URL and resets pagination', async () => {
+    mockNavigation.search = 'page=3';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ data: [contract(1)] })));
+    renderDash();
+
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Per page' }), '25');
+
+    expect(mockNavigation.replace).toHaveBeenCalledWith('/contracts?size=25', { scroll: false });
+  });
+
+  it('preserves the requested page when using pagination', async () => {
+    mockNavigation.search = 'page=2';
+    const contracts = Array.from({ length: 25 }, (_, index) => contract(index + 1));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ data: contracts })));
+    renderDash();
+
+    await screen.findByText('Page 2 of 3');
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(mockNavigation.replace).toHaveBeenCalledWith('/contracts?page=3', { scroll: false });
   });
 
   it('blocks invalid input via native form validation', async () => {

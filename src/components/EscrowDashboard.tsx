@@ -194,7 +194,13 @@ export function EscrowDashboard() {
   const update = useCallback(
     (patch: Partial<ContractQuery>, nextView: ViewFilter = view) => {
       if (patch.q !== undefined) setSearch(patch.q);
-      const params = presetToSearch({ query: { ...query, ...patch, page: 1 }, view: nextView });
+      const resetsPage = Object.keys(patch).some((key) => key !== "page");
+      const nextQuery = {
+        ...query,
+        ...patch,
+        page: resetsPage ? 1 : patch.page ?? query.page,
+      };
+      const params = presetToSearch({ query: nextQuery, view: nextView });
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -680,9 +686,11 @@ export function EscrowDashboard() {
         <EscrowToolbar
           status={query.status}
           sort={query.sort}
+          size={query.size}
           search={search}
           onStatusChange={(status) => update({ status })}
           onSortChange={(sort) => update({ sort })}
+          onSizeChange={(size) => update({ size })}
           onSearchChange={setSearch}
         />
         <p

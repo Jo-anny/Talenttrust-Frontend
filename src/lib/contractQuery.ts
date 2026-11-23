@@ -11,26 +11,33 @@ export const SORTS = {
 
 export type Sort = keyof typeof SORTS;
 
-export const PAGE_SIZE = 10;
+export const PAGE_SIZES = [10, 25, 50] as const;
+export type PageSize = (typeof PAGE_SIZES)[number];
+
+export const PAGE_SIZE: PageSize = 10;
 
 export interface ContractQuery {
   status: EscrowContract['status'] | '';
   q: string;
   sort: Sort;
   page: number;
+  size: PageSize;
 }
 
-export const DEFAULT_QUERY: ContractQuery = { status: '', q: '', sort: 'newest', page: 1 };
+export const DEFAULT_QUERY: ContractQuery = { status: '', q: '', sort: 'newest', page: 1, size: PAGE_SIZE };
 
 export function parseQuery(params: Pick<URLSearchParams, 'get'>): ContractQuery {
   const status = params.get('status') ?? '';
   const sort = params.get('sort') ?? '';
   const page = Number(params.get('page'));
+  const rawSize = params.get('size');
+  const size = PAGE_SIZES.find((value) => String(value) === rawSize) ?? PAGE_SIZE;
   return {
     status: (STATUSES as string[]).includes(status) ? (status as ContractQuery['status']) : '',
     q: (params.get('q') ?? '').trim(),
     sort: Object.prototype.hasOwnProperty.call(SORTS, sort) ? (sort as Sort) : 'newest',
     page: Number.isInteger(page) && page > 0 ? page : 1,
+    size,
   };
 }
 
@@ -40,6 +47,7 @@ export function toSearchParams(query: ContractQuery): URLSearchParams {
   if (query.q) params.set('q', query.q);
   if (query.sort !== 'newest') params.set('sort', query.sort);
   if (query.page > 1) params.set('page', String(query.page));
+  if (query.size !== PAGE_SIZE) params.set('size', String(query.size));
   return params;
 }
 
@@ -89,9 +97,9 @@ export function applyQuery(list: EscrowContract[], query: ContractQuery): QueryR
   const matches = filterContracts(list, query);
 
   const total = matches.length;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(total / query.size));
   const page = Math.min(query.page, pageCount);
-  const start = (page - 1) * PAGE_SIZE;
-  const items = matches.slice(start, start + PAGE_SIZE);
+  const start = (page - 1) * query.size;
+  const items = matches.slice(start, start + query.size);
   return { items, total, page, pageCount, from: total ? start + 1 : 0, to: start + items.length };
 }

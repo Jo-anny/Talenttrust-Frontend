@@ -1,24 +1,27 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { SORTS, STATUSES, type ContractQuery, type Sort } from '@/lib/contractQuery';
+import { PAGE_SIZES, SORTS, STATUSES, type ContractQuery, type PageSize, type Sort } from '@/lib/contractQuery';
 import { EscrowToolbar } from '../EscrowToolbar';
 
-function setup(overrides: { status?: ContractQuery['status']; sort?: Sort; search?: string } = {}) {
+function setup(overrides: { status?: ContractQuery['status']; sort?: Sort; size?: PageSize; search?: string } = {}) {
   const onStatusChange = vi.fn();
   const onSortChange = vi.fn();
+  const onSizeChange = vi.fn();
   const onSearchChange = vi.fn();
   render(
     <EscrowToolbar
       status={overrides.status ?? ''}
       sort={overrides.sort ?? 'newest'}
+      size={overrides.size ?? 10}
       search={overrides.search ?? ''}
       onStatusChange={onStatusChange}
       onSortChange={onSortChange}
+      onSizeChange={onSizeChange}
       onSearchChange={onSearchChange}
     />,
   );
-  return { onStatusChange, onSortChange, onSearchChange };
+  return { onStatusChange, onSortChange, onSizeChange, onSearchChange };
 }
 
 describe('EscrowToolbar', () => {
@@ -33,6 +36,7 @@ describe('EscrowToolbar', () => {
       expect(screen.getByRole('searchbox', { name: 'Search' })).toBeInTheDocument();
       expect(screen.getByRole('combobox', { name: 'Status' })).toBeInTheDocument();
       expect(screen.getByRole('combobox', { name: 'Sort' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Per page' })).toBeInTheDocument();
     });
   });
 
@@ -50,13 +54,20 @@ describe('EscrowToolbar', () => {
       expect(options.map((o) => o.value)).toEqual(Object.keys(SORTS));
       expect(options.map((o) => o.textContent)).toEqual(Object.values(SORTS));
     });
+
+    it('renders every allowed page size', () => {
+      setup();
+      const options = Array.from(screen.getByRole('combobox', { name: 'Per page' }).querySelectorAll('option'));
+      expect(options.map((option) => Number(option.value))).toEqual(PAGE_SIZES);
+    });
   });
 
   describe('controlled values', () => {
-    it('reflects the status, sort and search props', () => {
-      setup({ status: 'Disputed', sort: 'total', search: 'abc' });
+    it('reflects the status, sort, page size and search props', () => {
+      setup({ status: 'Disputed', sort: 'total', size: 25, search: 'abc' });
       expect(screen.getByRole('combobox', { name: 'Status' })).toHaveValue('Disputed');
       expect(screen.getByRole('combobox', { name: 'Sort' })).toHaveValue('total');
+      expect(screen.getByRole('combobox', { name: 'Per page' })).toHaveValue('25');
       expect(screen.getByRole('searchbox', { name: 'Search' })).toHaveValue('abc');
     });
   });
@@ -80,6 +91,13 @@ describe('EscrowToolbar', () => {
       await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Sort' }), 'Most in escrow');
       expect(onSortChange).toHaveBeenCalledTimes(1);
       expect(onSortChange).toHaveBeenCalledWith('escrow');
+    });
+
+    it('calls onSizeChange with the selected page size', async () => {
+      const { onSizeChange } = setup();
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Per page' }), '50');
+      expect(onSizeChange).toHaveBeenCalledTimes(1);
+      expect(onSizeChange).toHaveBeenCalledWith(50);
     });
 
     it('calls onSearchChange with the typed text', async () => {

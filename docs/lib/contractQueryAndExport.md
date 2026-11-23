@@ -14,7 +14,7 @@ Pure library modules for filtering, sorting, paginating, exporting, and optimist
 
 ## `contractQuery` (`src/lib/contractQuery.ts`)
 
-Parses and serializes URL search parameters (`?status=`, `?q=`, `?sort=`, `?page=`) and filters/sorts/paginates `EscrowContract[]` lists (`PAGE_SIZE = 10`).
+Parses and serializes URL search parameters (`?status=`, `?q=`, `?sort=`, `?page=`, `?size=`) and filters/sorts/paginates `EscrowContract[]` lists. Page sizes are 10, 25, or 50 contracts; the default size of 10 is omitted from the URL.
 
 - `STATUSES`: `['Created', 'Funded', 'Completed', 'Disputed', 'Resolved', 'Cancelled']`
 - `SORTS`: `{ newest: 'Newest', oldest: 'Oldest', total: 'Largest total', escrow: 'Most in escrow' }`

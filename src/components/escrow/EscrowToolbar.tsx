@@ -1,17 +1,28 @@
 'use client';
 
-import { ContractQuery, Sort, SORTS, STATUSES } from '@/lib/contractQuery';
+import { ContractQuery, PageSize, Sort, PAGE_SIZES, SORTS, STATUSES } from '@/lib/contractQuery';
 
 interface Props {
   status: ContractQuery['status'];
   sort: Sort;
+  size: PageSize;
   search: string;
   onStatusChange: (status: ContractQuery['status']) => void;
   onSortChange: (sort: Sort) => void;
+  onSizeChange: (size: PageSize) => void;
   onSearchChange: (search: string) => void;
 }
 
-export function EscrowToolbar({ status, sort, search, onStatusChange, onSortChange, onSearchChange }: Props) {
+export function EscrowToolbar({
+  status,
+  sort,
+  size,
+  search,
+  onStatusChange,
+  onSortChange,
+  onSizeChange,
+  onSearchChange,
+}: Props) {
   return (
     <div className="toolbar" role="search" aria-label="Filter escrows">
       <div className="field toolbar-search">
@@ -53,6 +64,21 @@ export function EscrowToolbar({ status, sort, search, onStatusChange, onSortChan
           {(Object.keys(SORTS) as Sort[]).map((s) => (
             <option key={s} value={s}>
               {SORTS[s]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor="escrow-page-size">Per page</label>
+        <select
+          id="escrow-page-size"
+          className="input"
+          value={size}
+          onChange={(e) => onSizeChange(Number(e.target.value) as PageSize)}
+        >
+          {PAGE_SIZES.map((pageSize) => (
+            <option key={pageSize} value={pageSize}>
+              {pageSize}
             </option>
           ))}
         </select>
