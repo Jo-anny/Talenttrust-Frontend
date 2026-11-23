@@ -39,7 +39,7 @@ Reference documentation for components, hooks, library modules, and guides in `s
 |----------|------------------|----------------|
 | [apiAndNetworking.md](./lib/apiAndNetworking.md) | `src/lib/api.ts`, `src/lib/swr.tsx`, `src/lib/commands.ts`, `src/lib/status.ts`, `src/lib/swRouting.ts`, `src/lib/site.ts` | REST client, SWR provider, command palette ranking, system status checks, and service worker routing |
 | [contractQueryAndExport.md](./lib/contractQueryAndExport.md) | `src/lib/contractQuery.ts`, `src/lib/csv.ts`, `src/lib/exportContracts.ts`, `src/lib/optimistic.ts`, `src/lib/statement.ts` | Escrow filtering/sorting/pagination, CSV formula sanitization and export, optimistic reducers, and statement ledger |
-| [notificationsAndWatchlist.md](./lib/notificationsAndWatchlist.md) | `src/lib/watchlist.ts`, `src/lib/notifications.ts`, `src/lib/poller.ts` | Watchlist snapshot diffing, `localStorage` notification store, and background poller |
+| [notificationsAndWatchlist.md](./lib/notificationsAndWatchlist.md) | `src/lib/watchlist.ts`, `src/lib/notifications.ts`, `src/lib/poller.ts`, `src/lib/tabLeader.ts` | Watchlist snapshot diffing, `localStorage` notification store, background poller, and tab-leader election |
 
 ---
 
@@ -50,3 +50,4 @@ Reference documentation for components, hooks, library modules, and guides in `s
 | [COPYWRITING_GUIDE.md](./COPYWRITING_GUIDE.md) | Voice, tone, and user-facing copy standards |
 | [keyboard.md](./keyboard.md) | Global and component keyboard shortcuts, dialog focus management, and live regions |
 | [stellar-address.md](./stellar-address.md) | Stellar StrKey validation and normalization (`src/lib/stellar/address.ts`) |
+| [statement-exports.md](./statement-exports.md) | Statement CSV/JSON downloads, ledger reconciliation, and mismatch warnings |

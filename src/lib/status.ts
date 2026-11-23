@@ -39,13 +39,26 @@ export async function fetchWithTimeout(
   url: string,
   init: RequestInit = {},
   timeoutMs = FETCH_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
+  const externalSignal = signal ?? init.signal ?? undefined;
+  const onExternalAbort = () => controller.abort(externalSignal?.reason);
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason);
+    } else {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
+
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -143,7 +156,7 @@ export interface ApiHealthData {
   [key: string]: unknown;
 }
 
-export async function checkApi(): Promise<StatusResult> {
+export async function checkApi(signal?: AbortSignal): Promise<StatusResult> {
   const url = `${site.apiUrl}/health`;
   const response = await fetchJson<ApiHealthData>(
     () => fetchWithTimeout(url),
@@ -152,6 +165,7 @@ export async function checkApi(): Promise<StatusResult> {
   );
   if (!response.ok) {
     return { state: 'down', latencyMs: response.latencyMs, detail: response.detail };
+    const res = await fetchWithTimeout(url, {}, FETCH_TIMEOUT_MS, signal);
   }
 
   const { data, latencyMs } = response;
@@ -176,7 +190,7 @@ export interface ChainConfigResult extends StatusResult {
   mismatch?: string;
 }
 
-export async function checkChainConfig(): Promise<ChainConfigResult> {
+export async function checkChainConfig(signal?: AbortSignal): Promise<ChainConfigResult> {
   const url = `${site.apiUrl}/api/v1/chain`;
   const response = await fetchJson<ChainConfigData>(
     () => fetchWithTimeout(url),
@@ -186,6 +200,7 @@ export async function checkChainConfig(): Promise<ChainConfigResult> {
   if (!response.ok) {
     return { state: 'down', latencyMs: response.latencyMs, detail: response.detail };
   }
+    const res = await fetchWithTimeout(url, {}, FETCH_TIMEOUT_MS, signal);
 
   const { data, latencyMs } = response;
 
@@ -230,7 +245,7 @@ interface JsonRpcResponse<T> {
   error?: { code: number; message: string };
 }
 
-export async function checkRpc(rpcUrl: string): Promise<StatusResult> {
+export async function checkRpc(rpcUrl: string, signal?: AbortSignal): Promise<StatusResult> {
   if (!rpcUrl) {
     return { state: 'down', latencyMs: 0, detail: 'RPC URL not configured' };
   }
@@ -247,13 +262,27 @@ export async function checkRpc(rpcUrl: string): Promise<StatusResult> {
           method: 'getLatestLedger',
           params: {},
         }),
-      }),
     'from Soroban RPC',
     'RPC request',
   );
   if (!response.ok) {
     return { state: 'down', latencyMs: response.latencyMs, detail: response.detail };
   }
+    const res = await fetchWithTimeout(
+      rpcUrl,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getLatestLedger',
+          params: {},
+        }),
+      },
+      FETCH_TIMEOUT_MS,
+      signal,
+    );
 
   const { data, latencyMs } = response;
   if (data.error) {
@@ -278,7 +307,7 @@ export async function checkRpc(rpcUrl: string): Promise<StatusResult> {
 // present; a full simulation requires SDK signing which is out of scope)
 // ──────────────────────────────────────────────────────────────────────────────
 
-export async function checkContract(rpcUrl: string): Promise<StatusResult> {
+export async function checkContract(rpcUrl: string, signal?: AbortSignal): Promise<StatusResult> {
   if (!rpcUrl) {
     return { state: 'down', latencyMs: 0, detail: 'RPC URL required to check contract' };
   }
@@ -297,13 +326,27 @@ export async function checkContract(rpcUrl: string): Promise<StatusResult> {
           method: 'getLatestLedger',
           params: {},
         }),
-      }),
     'checking contract via RPC',
     'Contract check',
   );
   if (!response.ok) {
     return { state: 'down', latencyMs: response.latencyMs, detail: response.detail };
   }
+    const res = await fetchWithTimeout(
+      rpcUrl,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'getLatestLedger',
+          params: {},
+        }),
+      },
+      FETCH_TIMEOUT_MS,
+      signal,
+    );
 
   const { data, latencyMs } = response;
   if (data.error) {
