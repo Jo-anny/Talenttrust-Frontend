@@ -69,6 +69,69 @@ function isAbortError(err: unknown): boolean {
   return typeof message === 'string' && /abort|timed? ?out/i.test(message);
 }
 
+type TimedResult<T> =
+  | { ok: true; value: T; latencyMs: number }
+  | { ok: false; error: unknown; latencyMs: number };
+
+async function timed<T>(fn: () => Promise<T>): Promise<TimedResult<T>> {
+  const startedAt = Date.now();
+  try {
+    const value = await fn();
+    return { ok: true, value, latencyMs: Date.now() - startedAt };
+  } catch (error) {
+    return { ok: false, error, latencyMs: Date.now() - startedAt };
+  }
+}
+
+function describeFetchError(err: unknown, label: string): string {
+  if (isAbortError(err)) {
+    return `${label} timed out after ${FETCH_TIMEOUT_MS / 1000}s`;
+  }
+  return `Network error: ${err instanceof Error ? err.message : String(err)}`;
+}
+
+type JsonResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; detail: string };
+
+async function readJson<T>(res: Response, label: string): Promise<JsonResult<T>> {
+  if (!res.ok) {
+    return { ok: false, detail: `HTTP ${res.status} ${label}` };
+  }
+
+  try {
+    const data: T = await res.json();
+    return { ok: true, data };
+  } catch {
+    return { ok: false, detail: `Malformed JSON ${label}` };
+  }
+}
+
+type FetchJsonResult<T> =
+  | { ok: true; data: T; latencyMs: number }
+  | { ok: false; detail: string; latencyMs: number };
+
+async function fetchJson<T>(
+  fn: () => Promise<Response>,
+  responseLabel: string,
+  timeoutLabel: string,
+): Promise<FetchJsonResult<T>> {
+  const response = await timed(fn);
+  if (!response.ok) {
+    return {
+      ok: false,
+      latencyMs: response.latencyMs,
+      detail: describeFetchError(response.error, timeoutLabel),
+    };
+  }
+
+  const json = await readJson<T>(response.value, responseLabel);
+  if (!json.ok) {
+    return { ok: false, latencyMs: response.latencyMs, detail: json.detail };
+  }
+  return { ok: true, latencyMs: response.latencyMs, data: json.data };
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // checkApi — GET /health
 // ──────────────────────────────────────────────────────────────────────────────
@@ -82,36 +145,19 @@ export interface ApiHealthData {
 
 export async function checkApi(): Promise<StatusResult> {
   const url = `${site.apiUrl}/health`;
-  const t0 = Date.now();
-  try {
-    const res = await fetchWithTimeout(url);
-    const latencyMs = Date.now() - t0;
-
-    if (!res.ok) {
-      return { state: 'down', latencyMs, detail: `HTTP ${res.status} from /health` };
-    }
-
-    let data: ApiHealthData;
-    try {
-      data = await res.json();
-    } catch {
-      return { state: 'down', latencyMs, detail: 'Malformed JSON from /health' };
-    }
-
-    const versionStr = data.version ? ` v${data.version}` : '';
-    const detail = `API${versionStr} responded in ${latencyMs}ms`;
-    return { state: classify(latencyMs), latencyMs, detail };
-  } catch (err) {
-    const latencyMs = Date.now() - t0;
-    const timedOut = isAbortError(err);
-    return {
-      state: 'down',
-      latencyMs,
-      detail: timedOut
-        ? `Request timed out after ${FETCH_TIMEOUT_MS / 1000}s`
-        : `Network error: ${err instanceof Error ? err.message : String(err)}`,
-    };
+  const response = await fetchJson<ApiHealthData>(
+    () => fetchWithTimeout(url),
+    'from /health',
+    'Request',
+  );
+  if (!response.ok) {
+    return { state: 'down', latencyMs: response.latencyMs, detail: response.detail };
   }
+
+  const { data, latencyMs } = response;
+  const versionStr = data.version ? ` v${data.version}` : '';
+  const detail = `API${versionStr} responded in ${latencyMs}ms`;
+  return { state: classify(latencyMs), latencyMs, detail };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -132,62 +178,47 @@ export interface ChainConfigResult extends StatusResult {
 
 export async function checkChainConfig(): Promise<ChainConfigResult> {
   const url = `${site.apiUrl}/api/v1/chain`;
-  const t0 = Date.now();
-  try {
-    const res = await fetchWithTimeout(url);
-    const latencyMs = Date.now() - t0;
+  const response = await fetchJson<ChainConfigData>(
+    () => fetchWithTimeout(url),
+    'from /api/v1/chain',
+    'Request',
+  );
+  if (!response.ok) {
+    return { state: 'down', latencyMs: response.latencyMs, detail: response.detail };
+  }
 
-    if (!res.ok) {
-      return { state: 'down', latencyMs, detail: `HTTP ${res.status} from /api/v1/chain` };
-    }
+  const { data, latencyMs } = response;
 
-    let data: ChainConfigData;
-    try {
-      data = await res.json();
-    } catch {
-      return { state: 'down', latencyMs, detail: 'Malformed JSON from /api/v1/chain' };
-    }
+  // Mismatch detection
+  const mismatches: string[] = [];
+  if (data.contractId && data.contractId !== site.contractId) {
+    mismatches.push(
+      `Contract ID mismatch — backend: ${data.contractId}, frontend: ${site.contractId}`,
+    );
+  }
+  if (data.network && data.network !== site.network) {
+    mismatches.push(
+      `Network mismatch — backend: ${data.network}, frontend: ${site.network}`,
+    );
+  }
 
-    // Mismatch detection
-    const mismatches: string[] = [];
-    if (data.contractId && data.contractId !== site.contractId) {
-      mismatches.push(
-        `Contract ID mismatch — backend: ${data.contractId}, frontend: ${site.contractId}`,
-      );
-    }
-    if (data.network && data.network !== site.network) {
-      mismatches.push(
-        `Network mismatch — backend: ${data.network}, frontend: ${site.network}`,
-      );
-    }
-
-    if (mismatches.length > 0) {
-      return {
-        state: 'degraded',
-        latencyMs,
-        detail: mismatches.join(' | '),
-        rpcUrl: data.rpcUrl,
-        mismatch: mismatches.join(' | '),
-      };
-    }
-
-    const detail = `Network: ${data.network ?? 'unknown'}, Contract: ${(data.contractId ?? '').slice(0, 8)}…`;
+  if (mismatches.length > 0) {
     return {
-      state: classify(latencyMs),
+      state: 'degraded',
       latencyMs,
-      detail,
+      detail: mismatches.join(' | '),
       rpcUrl: data.rpcUrl,
-    };
-  } catch (err) {
-    const latencyMs = Date.now() - t0;
-    return {
-      state: 'down',
-      latencyMs,
-      detail: isAbortError(err)
-        ? `Request timed out after ${FETCH_TIMEOUT_MS / 1000}s`
-        : `Network error: ${err instanceof Error ? err.message : String(err)}`,
+      mismatch: mismatches.join(' | '),
     };
   }
+
+  const detail = `Network: ${data.network ?? 'unknown'}, Contract: ${(data.contractId ?? '').slice(0, 8)}…`;
+  return {
+    state: classify(latencyMs),
+    latencyMs,
+    detail,
+    rpcUrl: data.rpcUrl,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -204,56 +235,41 @@ export async function checkRpc(rpcUrl: string): Promise<StatusResult> {
     return { state: 'down', latencyMs: 0, detail: 'RPC URL not configured' };
   }
 
-  const t0 = Date.now();
-  try {
-    // getLatestLedger is a cheap read-only call supported by all Soroban RPCs
-    const res = await fetchWithTimeout(rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'getLatestLedger',
-        params: {},
+  // getLatestLedger is a cheap read-only call supported by all Soroban RPCs
+  const response = await fetchJson<JsonRpcResponse<{ sequence: number; protocolVersion: number }>>(
+    () =>
+      fetchWithTimeout(rpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getLatestLedger',
+          params: {},
+        }),
       }),
-    });
-    const latencyMs = Date.now() - t0;
+    'from Soroban RPC',
+    'RPC request',
+  );
+  if (!response.ok) {
+    return { state: 'down', latencyMs: response.latencyMs, detail: response.detail };
+  }
 
-    if (!res.ok) {
-      return { state: 'down', latencyMs, detail: `HTTP ${res.status} from Soroban RPC` };
-    }
-
-    let data: JsonRpcResponse<{ sequence: number; protocolVersion: number }>;
-    try {
-      data = await res.json();
-    } catch {
-      return { state: 'down', latencyMs, detail: 'Malformed JSON from Soroban RPC' };
-    }
-
-    if (data.error) {
-      return {
-        state: 'down',
-        latencyMs,
-        detail: `RPC error ${data.error.code}: ${data.error.message}`,
-      };
-    }
-
-    if (!data.result) {
-      return { state: 'down', latencyMs, detail: 'Unexpected RPC response shape' };
-    }
-
-    const detail = `Ledger #${data.result.sequence}, protocol v${data.result.protocolVersion}`;
-    return { state: classify(latencyMs), latencyMs, detail };
-  } catch (err) {
-    const latencyMs = Date.now() - t0;
+  const { data, latencyMs } = response;
+  if (data.error) {
     return {
       state: 'down',
       latencyMs,
-      detail: isAbortError(err)
-        ? `RPC request timed out after ${FETCH_TIMEOUT_MS / 1000}s`
-        : `Network error: ${err instanceof Error ? err.message : String(err)}`,
+      detail: `RPC error ${data.error.code}: ${data.error.message}`,
     };
   }
+
+  if (!data.result) {
+    return { state: 'down', latencyMs, detail: 'Unexpected RPC response shape' };
+  }
+
+  const detail = `Ledger #${data.result.sequence}, protocol v${data.result.protocolVersion}`;
+  return { state: classify(latencyMs), latencyMs, detail };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -267,67 +283,44 @@ export async function checkContract(rpcUrl: string): Promise<StatusResult> {
     return { state: 'down', latencyMs: 0, detail: 'RPC URL required to check contract' };
   }
 
-  const t0 = Date.now();
-  try {
-    // Use getLedgerEntries to verify the contract exists on-chain.
-    // We POST a valid JSON-RPC request; a 200 response with a result means
-    // the RPC is aware of the contract's ledger domain.
-    const res = await fetchWithTimeout(rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 2,
-        method: 'getLatestLedger',
-        params: {},
+  // Use getLedgerEntries to verify the contract exists on-chain.
+  // We POST a valid JSON-RPC request; a 200 response with a result means
+  // the RPC is aware of the contract's ledger domain.
+  const response = await fetchJson<JsonRpcResponse<{ sequence: number }>>(
+    () =>
+      fetchWithTimeout(rpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'getLatestLedger',
+          params: {},
+        }),
       }),
-    });
-    const latencyMs = Date.now() - t0;
+    'checking contract via RPC',
+    'Contract check',
+  );
+  if (!response.ok) {
+    return { state: 'down', latencyMs: response.latencyMs, detail: response.detail };
+  }
 
-    if (!res.ok) {
-      return {
-        state: 'down',
-        latencyMs,
-        detail: `HTTP ${res.status} checking contract via RPC`,
-      };
-    }
-
-    let data: JsonRpcResponse<{ sequence: number }>;
-    try {
-      data = await res.json();
-    } catch {
-      return {
-        state: 'down',
-        latencyMs,
-        detail: 'Malformed JSON checking contract via RPC',
-      };
-    }
-
-    if (data.error) {
-      return {
-        state: 'down',
-        latencyMs,
-        detail: `RPC error ${data.error.code}: ${data.error.message}`,
-      };
-    }
-
-    if (!data.result) {
-      return { state: 'down', latencyMs, detail: 'Unexpected response checking contract' };
-    }
-
-    const shortId = site.contractId.slice(0, 8);
-    const detail = `Contract ${shortId}… reachable at ledger #${data.result.sequence}`;
-    return { state: classify(latencyMs), latencyMs, detail };
-  } catch (err) {
-    const latencyMs = Date.now() - t0;
+  const { data, latencyMs } = response;
+  if (data.error) {
     return {
       state: 'down',
       latencyMs,
-      detail: isAbortError(err)
-        ? `Contract check timed out after ${FETCH_TIMEOUT_MS / 1000}s`
-        : `Network error: ${err instanceof Error ? err.message : String(err)}`,
+      detail: `RPC error ${data.error.code}: ${data.error.message}`,
     };
   }
+
+  if (!data.result) {
+    return { state: 'down', latencyMs, detail: 'Unexpected response checking contract' };
+  }
+
+  const shortId = site.contractId.slice(0, 8);
+  const detail = `Contract ${shortId}… reachable at ledger #${data.result.sequence}`;
+  return { state: classify(latencyMs), latencyMs, detail };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

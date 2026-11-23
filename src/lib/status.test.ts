@@ -83,6 +83,40 @@ describe('fetchWithTimeout', () => {
   });
 });
 
+describe('shared fetch handling', () => {
+  it('preserves timeout labels and network error details for each checker', async () => {
+    const checks = [
+      { run: () => checkApi(), timeoutDetail: 'Request timed out after 5s' },
+      { run: () => checkChainConfig(), timeoutDetail: 'Request timed out after 5s' },
+      { run: () => checkRpc('https://rpc.example.com'), timeoutDetail: 'RPC request timed out after 5s' },
+      { run: () => checkContract('https://rpc.example.com'), timeoutDetail: 'Contract check timed out after 5s' },
+    ];
+
+    for (const { run, timeoutDetail } of checks) {
+      mockFetch.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
+      expect((await run()).detail).toBe(timeoutDetail);
+
+      mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      expect((await run()).detail).toBe('Network error: Failed to fetch');
+    }
+  });
+
+  it('returns the endpoint-specific detail when JSON parsing fails', async () => {
+    const badResponse = {
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError('bad json');
+      },
+    } as unknown as Response;
+    mockFetch.mockResolvedValueOnce(badResponse);
+
+    const result = await checkApi();
+
+    expect(result.detail).toBe('Malformed JSON from /health');
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // checkApi
 // ─────────────────────────────────────────────────────────────────────────────
