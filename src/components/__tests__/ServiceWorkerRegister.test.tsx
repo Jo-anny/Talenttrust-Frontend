@@ -11,6 +11,7 @@ let mockController: ServiceWorker | null = null;
 const mockRegister = vi.fn();
 const mockAddEventListener = vi.fn();
 const mockRemoveEventListener = vi.fn();
+let visibilityStateDescriptor: PropertyDescriptor | undefined;
 
 const mockWaiting = {
   postMessage: vi.fn(),
@@ -22,7 +23,7 @@ function createMockRegistration(waiting?: ServiceWorker): ServiceWorkerRegistrat
     installing: null,
     active: mockController,
     scope: '/',
-    update: vi.fn(),
+    update: vi.fn().mockResolvedValue(undefined),
     unregister: vi.fn(),
     addEventListener: mockAddEventListener,
     removeEventListener: mockRemoveEventListener,
@@ -36,6 +37,7 @@ function createMockRegistration(waiting?: ServiceWorker): ServiceWorkerRegistrat
 describe('ServiceWorkerRegister', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    visibilityStateDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState');
     mockController = null;
     vi.stubEnv('NODE_ENV', 'production');
 
@@ -56,6 +58,12 @@ describe('ServiceWorkerRegister', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    if (visibilityStateDescriptor) {
+      Object.defineProperty(document, 'visibilityState', visibilityStateDescriptor);
+    } else {
+      delete (document as Partial<Document>).visibilityState;
+    }
+    vi.useRealTimers();
   });
 
   it('renders nothing when no update is available', () => {
@@ -71,6 +79,62 @@ describe('ServiceWorkerRegister', () => {
     });
 
     expect(mockRegister).toHaveBeenCalledWith('/sw.js');
+  });
+
+  it('removes the updatefound listener on unmount', async () => {
+    const reg = createMockRegistration();
+    mockRegister.mockResolvedValue(reg);
+
+    const { unmount } = render(<ServiceWorkerRegister />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const listener = mockAddEventListener.mock.calls.find(([event]) => event === 'updatefound')?.[1];
+    expect(listener).toEqual(expect.any(Function));
+
+    unmount();
+
+    expect(mockRemoveEventListener).toHaveBeenCalledWith('updatefound', listener);
+  });
+
+  it('checks for updates when the document becomes visible', async () => {
+    const reg = createMockRegistration();
+    mockRegister.mockResolvedValue(reg);
+    render(<ServiceWorkerRegister />);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(reg.update).toHaveBeenCalledOnce();
+  });
+
+  it('checks for updates hourly and clears the interval on unmount', async () => {
+    const reg = createMockRegistration();
+    mockRegister.mockResolvedValue(reg);
+    vi.useFakeTimers();
+
+    const { unmount } = render(<ServiceWorkerRegister />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    });
+    expect(reg.update).toHaveBeenCalledOnce();
+
+    unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    });
+    expect(reg.update).toHaveBeenCalledOnce();
   });
 
   it('shows update prompt when a waiting worker exists', async () => {

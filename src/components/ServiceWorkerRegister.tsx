@@ -31,15 +31,30 @@ export default function ServiceWorkerRegister() {
     if (!('serviceWorker' in navigator) || !navigator.serviceWorker) return;
 
     let registration: ServiceWorkerRegistration | undefined;
+    let handleUpdateFound: (() => void) | undefined;
+    let updateInterval: ReturnType<typeof setInterval> | undefined;
+    let isDisposed = false;
 
     const handleControllerChange = () => {
       // The new SW has taken control — reload to pick up new assets.
       window.location.reload();
     };
 
+    const checkForUpdates = () => {
+      if (!registration) return;
+      void registration.update().catch((error) => {
+        console.error('Service worker update check failed', error);
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkForUpdates();
+    };
+
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
+        if (isDisposed) return;
         registration = reg;
 
         // Detect a new SW waiting on initial registration.
@@ -49,7 +64,7 @@ export default function ServiceWorkerRegister() {
         }
 
         // Listen for future updates.
-        reg.addEventListener('updatefound', () => {
+        handleUpdateFound = () => {
           const newWorker = reg.installing;
           if (!newWorker) return;
 
@@ -60,7 +75,10 @@ export default function ServiceWorkerRegister() {
               setShowUpdate(true);
             }
           });
-        });
+        };
+        reg.addEventListener('updatefound', handleUpdateFound);
+
+        updateInterval = setInterval(checkForUpdates, 60 * 60 * 1000);
       })
       .catch((_err) => {
         // SW registration failed — fail silently in production.
@@ -68,10 +86,16 @@ export default function ServiceWorkerRegister() {
 
     // When the new SW takes control, reload the page.
     navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      isDisposed = true;
       navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
-      registration?.removeEventListener('updatefound', () => {});
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (updateInterval !== undefined) clearInterval(updateInterval);
+      if (registration && handleUpdateFound) {
+        registration.removeEventListener('updatefound', handleUpdateFound);
+      }
     };
   }, []);
 
